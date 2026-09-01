@@ -1,38 +1,83 @@
-#define IR_SEND_PIN 12  // Connect XC4426 'S' to this pin
-#define IR_RECEIVE_PIN 4  // Connect XC4427 'S' to this pin
-
 #include <IRremote.hpp> // Using the modern IRremote v4.x syntax
 
+const int NN_IR =  4;
+const int NE_IR =  5;
+const int EE_IR =  6;
+const int SE_IR =  7;
+const int SS_IR =  8;
+const int SW_IR =  9;
+const int WW_IR =  10;
+const int NW_IR =  11;
+
+const int SG_IR = 12; // signal IR
+
+volatile bool nnDetected = false;
+volatile bool neDetected  = false;
+volatile bool eeDetected  = false;
+volatile bool seDetected = false;
+volatile bool ssDetected = false;
+volatile bool swDetected = false;
+volatile bool wwDetected  = false;
+volatile bool nwDetected  = false;
+
 void setup() {
-  Serial.begin(115200);
-  
-  // Initialize the sender on your custom pin
-  IrSender.begin(IR_SEND_PIN);
-  
-  // Initialize the receiver
-  IrReceiver.begin(IR_RECEIVE_PIN, ENABLE_LED_FEEDBACK);
-  
-  Serial.println("IR Transmitter and Receiver Initialized.");
+    Serial.begin(115200);
+    
+    IrSender.begin(SG_IR);
+
+    pinMode(NN_IR, INPUT_PULLUP);
+    pinMode(NE_IR, INPUT_PULLUP);
+    pinMode(EE_IR, INPUT_PULLUP);
+    pinMode(SE_IR, INPUT_PULLUP);
+    pinMode(SS_IR, INPUT_PULLUP); 
+    pinMode(SW_IR, INPUT_PULLUP); 
+    pinMode(WW_IR, INPUT_PULLUP);
+    pinMode(NW_IR, INPUT_PULLUP);
+
+    // Enable pin-change interrupts on ranges 8-13 & 0-7
+    PCICR |= (1 << PCIE0);  
+    PCICR |= (1 << PCIE2);  
+    // Then enable for each used pin:
+    PCMSK2 |= (1 << PCINT20); // Pin 4
+    PCMSK2 |= (1 << PCINT22); // Pin 6
+    
+
+    Serial.println("4 IR SENSOR TEST");
+}
+
+ISR(PCINT0_vect) {
+    // Pins 8-11
+    if (digitalRead(SS_IR) == LOW) ssDetected = true;
+    if (digitalRead(SW_IR) == LOW) swDetected = true;
+    if (digitalRead(WW_IR) == LOW) wwDetected = true;
+    if (digitalRead(NW_IR) == LOW) nwDetected = true;
+}
+ISR(PCINT2_vect) {
+    // Pins 4-7
+    if (digitalRead(NN_IR) == LOW) nnDetected = true;
+    if (digitalRead(NE_IR) == LOW) neDetected = true;
+    if (digitalRead(EE_IR) == LOW) eeDetected = true;
+    if (digitalRead(SE_IR) == LOW) seDetected = true;
+}
+
+void emitIR() {
+    IrSender.enableIROut(38);  // 38 kHz carrier
+    IrSender.mark(5000);       // 5 ms of 38 kHz IR
+    IrSender.space(1000);       // 1000 us off
 }
 
 void loop() {
-  // 1. Transmit a custom 16-bit pulse payload at 38kHz
-  uint16_t address = 0x01;
-  uint8_t command = 0x34;
-  
-  Serial.println("Sending IR pulse...");
-  IrSender.sendNEC(address, command, 0); 
-  
-  delay(100); // Small delay to allow transmission to clear
-  
-  // 2. Check if the receiver module picked it up
-  if (IrReceiver.decode()) {
-    Serial.println("Pulse received successfully!");
-    Serial.print("Data: 0x");
-    Serial.println(IrReceiver.decodedIRData.command, HEX);
+    // reset all detection states
+    nDetected = false; eDetected = false; sDetected = false; wDetected = false;
     
-    IrReceiver.resume(); // Enable receiving the next value
-  }
-  
-  delay(1000); // Wait 1 second before pulsing again
+    emitIR();
+    delay(2); // wait a tiny bit to ensure receivers have detected
+
+    Serial.print(" NORTH: ");         Serial.print(nDetected? "DETECTED" : "-");
+    Serial.print("    |    EAST: ");  Serial.print(eDetected? "DETECTED" : "-");
+    Serial.print("    |    SOUTH: "); Serial.print(sDetected? "DETECTED" : "-");
+    Serial.print("    |    WEST: ");  Serial.print(wDetected? "DETECTED" : "-");
+    Serial.println();
+
+    delay(100);
 }
