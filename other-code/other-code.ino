@@ -19,6 +19,7 @@ volatile bool ssDetected = false;
 volatile bool swDetected = false;
 volatile bool wwDetected  = false;
 volatile bool nwDetected  = false;
+volatile bool bools[8];
 
 void setup() {
     Serial.begin(115200);
@@ -38,11 +39,17 @@ void setup() {
     PCICR |= (1 << PCIE0);  
     PCICR |= (1 << PCIE2);  
     // Then enable for each used pin:
-    PCMSK2 |= (1 << PCINT20); // Pin 4
-    PCMSK2 |= (1 << PCINT22); // Pin 6
+    PCMSK2 |= (1 << PCINT20); // Pin 4  (NN)
+    PCMSK2 |= (1 << PCINT21); // Pin 5  (NE)
+    PCMSK2 |= (1 << PCINT22); // Pin 6  (EE)
+    PCMSK2 |= (1 << PCINT23); // Pin 7  (SE)
+    PCMSK0 |= (1 << PCINT0);  // Pin 8  (SS)
+    PCMSK0 |= (1 << PCINT1);  // Pin 9  (SW)
+    PCMSK0 |= (1 << PCINT2);  // Pin 10 (WW)
+    PCMSK0 |= (1 << PCINT3);  // Pin 11 (NW)
     
 
-    Serial.println("4 IR SENSOR TEST");
+    Serial.println("8 IR SENSOR TEST");
 }
 
 ISR(PCINT0_vect) {
@@ -66,17 +73,43 @@ void emitIR() {
     IrSender.space(1000);       // 1000 us off
 }
 
+void getDetectStates() {
+    bools[0] = nnDetected;
+    bools[1] = neDetected;
+    bools[2] = eeDetected;
+    bools[3] = seDetected;
+    bools[4] = ssDetected;
+    bools[5] = swDetected;
+    bools[6] = wwDetected;
+    bools[7] = nwDetected;
+}
+
+void resetDetectStates() {
+    nnDetected = false;
+    neDetected = false;
+    eeDetected = false;
+    seDetected = false;
+    ssDetected = false;
+    swDetected = false;
+    wwDetected = false;
+    nwDetected = false;
+}
+
 void loop() {
-    // reset all detection states
-    nDetected = false; eDetected = false; sDetected = false; wDetected = false;
+    resetDetectStates();
     
     emitIR();
     delay(2); // wait a tiny bit to ensure receivers have detected
 
-    Serial.print(" NORTH: ");         Serial.print(nDetected? "DETECTED" : "-");
-    Serial.print("    |    EAST: ");  Serial.print(eDetected? "DETECTED" : "-");
-    Serial.print("    |    SOUTH: "); Serial.print(sDetected? "DETECTED" : "-");
-    Serial.print("    |    WEST: ");  Serial.print(wDetected? "DETECTED" : "-");
+    getDetectStates();
+    Serial.print(        " NN: ");  Serial.print(bools[0]? "DETECTED" : "-");
+    Serial.print("    |    NE: ");  Serial.print(bools[1]? "DETECTED" : "-");
+    Serial.print("    |    EE: ");  Serial.print(bools[2]? "DETECTED" : "-");
+    Serial.print("    |    SE: ");  Serial.print(bools[3]? "DETECTED" : "-");
+    Serial.print("    |    SS: ");  Serial.print(bools[4]? "DETECTED" : "-");
+    Serial.print("    |    SW: ");  Serial.print(bools[5]? "DETECTED" : "-");
+    Serial.print("    |    WW: ");  Serial.print(bools[6]? "DETECTED" : "-");
+    Serial.print("    |    NW: ");  Serial.print(bools[7]? "DETECTED" : "-");
     Serial.println();
 
     delay(100);

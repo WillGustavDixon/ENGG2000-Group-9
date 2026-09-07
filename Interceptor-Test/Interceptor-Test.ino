@@ -7,6 +7,7 @@ const int ENC_PIN_A = 2;  // encoder pin A
 const int ENC_PIN_B = 3;  // encoder pin B
 
 const int IRR_PINS[] = {4,5,6,7,8,9,10,11}; // IR receiver pins
+volatile bool IRR_STATES[8];
 const int IRR_PINS_AMT = sizeof(IRR_PINS) / sizeof(IRR_PINS[0]);
 const int IRS_PIN = 12; // IR emitter pin 
 
@@ -133,11 +134,25 @@ void setup() {
 
     Serial.print("IR Receivers ");
     for(int i = 0; i < IRR_PINS_AMT; i++) {
-        IrReceiver.begin(IRR_PINS[i], ENABLE_LED_FEEDBACK);
+        pinMode(IRR_PINS[i], INPUT_PULLUP);
+        IRR_STATES[i] = false;
         Serial.print(IRR_PINS[i]);
         Serial.print(", ");
     }
     Serial.println("initialised.");
+
+    // Enable pin-change interrupts on ranges 8-13 & 0-7
+    PCICR |= (1 << PCIE0);  
+    PCICR |= (1 << PCIE2);  
+    // Then enable for each used pin:
+    PCMSK2 |= (1 << PCINT20); // Pin 4  (NN)
+    PCMSK2 |= (1 << PCINT21); // Pin 5  (NE)
+    PCMSK2 |= (1 << PCINT22); // Pin 6  (EE)
+    PCMSK2 |= (1 << PCINT23); // Pin 7  (SE)
+    PCMSK0 |= (1 << PCINT0);  // Pin 8  (SS)
+    PCMSK0 |= (1 << PCINT1);  // Pin 9  (SW)
+    PCMSK0 |= (1 << PCINT2);  // Pin 10 (WW)
+    PCMSK0 |= (1 << PCINT3);  // Pin 11 (NW)
     	
     pinMode(ENC_PIN_A, INPUT); // set pins to read motor encoder as input
     pinMode(ENC_PIN_B, INPUT);
@@ -157,27 +172,45 @@ void setup() {
 }
 
 void emitIR() {
-    // 1. Transmit a custom 16-bit pulse payload at 38kHz
-    uint16_t address = 0x01;
-    uint8_t command = 0x34;
-    
-    Serial.println("Sending IR pulse...");
-    IrSender.sendNEC(address, command, 0); 
+    IrSender.enableIROut(38);  // 38 kHz carrier
+    IrSender.mark(5000);       // 5 ms of 38 kHz IR
+    IrSender.space(1000);       // 1000 us off
+}
+
+ISR(PCINT0_vect) {
+    // Pins 8-11
+    if (digitalRead(IRR_PINS[4]) == LOW) IRR_STATES[4] = true;
+    if (digitalRead(IRR_PINS[5]) == LOW) IRR_STATES[5] = true;
+    if (digitalRead(IRR_PINS[6]) == LOW) IRR_STATES[6] = true;
+    if (digitalRead(IRR_PINS[7]) == LOW) IRR_STATES[7] = true;
+}
+ISR(PCINT2_vect) {
+    if (digitalRead(IRR_PINS[0]) == LOW) IRR_STATES[0] = true;
+    if (digitalRead(IRR_PINS[1]) == LOW) IRR_STATES[1] = true;
+    if (digitalRead(IRR_PINS[2]) == LOW) IRR_STATES[2] = true;
+    if (digitalRead(IRR_PINS[3]) == LOW) IRR_STATES[3] = true;
 }
 
 int checkIR() {
-    // 2. Check if the receiver module picked it up
-    if (IrReceiver.decode()) {
-        Serial.println("Pulse received successfully!");
-        Serial.print("Data: 0x");
-        Serial.println(IrReceiver.decodedIRData.command, HEX);
-        
-        IrReceiver.resume(); // Enable receiving the next value
+    for(int i = 0; i < IRR_PINS_AMT; i++) {
+        if(IRR_STATES[i]) {
+            Serial.print("Found at: "); Serial.print(i); Serial.print(", ");
+        }
+    }
+    Serial.println();
+    return 0;
+}
+
+void resetDetectStates() {
+    for(int i = 0; i < IRR_PINS_AMT; i++) {
+        IRR_STATES[i] = false;
     }
 }
 
 void loop() { 
+    resetDetectStates();
     emitIR();
+    delay(2); // wait a tiny bit to ensure receivers have detected
     float deg = checkIR();
     pulseToDeg = getMotorPos();
 	if(deg > 0 || deg < 0) { // if an IR signal is detected 
@@ -185,5 +218,5 @@ void loop() {
         fireLaser();
         beginCooldown();
 	}
-    //Serial.println(pulseToDeg); 
+    delay(100);
 }
