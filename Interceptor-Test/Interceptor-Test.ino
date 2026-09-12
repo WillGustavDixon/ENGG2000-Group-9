@@ -7,8 +7,10 @@ const int ENC_PIN_A = 2;  // encoder pin A
 const int ENC_PIN_B = 3;  // encoder pin B
 
 const int IRR_PINS[] = {4,5,6,7,8,9,10,11}; // IR receiver pins
-volatile bool IRR_STATES[8];
 const int IRR_PINS_AMT = sizeof(IRR_PINS) / sizeof(IRR_PINS[0]);
+volatile bool IRR_STATES[IRR_PINS_AMT];
+volatile int IRR_HITS[IRR_PINS_AMT];
+
 const int IRS_PIN = 12; // IR emitter pin 
 
 const int LAS_PIN = 13; // laser pin
@@ -51,10 +53,6 @@ void countPulses() {
     digitalRead(ENC_PIN_B) > 0? totalMotorPulses++ : totalMotorPulses--;
 }
 
-void beginCooldown() {
-    cd = true;
-    cdTimer = IR_COOLDOWN;
-}
 
 // INPUT: N/A;    OUTPUT: whether IR signal was found.
 // FUNCTION: check all IRR pins for any input, if there is check if pulse frequency meets the threshold and return true if it does
@@ -121,6 +119,7 @@ void fireLaser() {
     digitalWrite(LAS_PIN, LOW); // turn off laser
 
     analogWrite(EN_PIN, SPEED); // begin spinning motor again
+    delay(500);
     Serial.println("Laser fired, resuming search");
 }
 
@@ -191,14 +190,14 @@ ISR(PCINT2_vect) {
     if (digitalRead(IRR_PINS[3]) == LOW) IRR_STATES[3] = true;
 }
 
-int checkIR() {
-    for(int i = 0; i < IRR_PINS_AMT; i++) {
+float checkIR() {
+    for(int i = 0; i < IRR_PINS_AMT; i++) { 
         if(IRR_STATES[i]) {
-            Serial.print("Found at: "); Serial.print(i); Serial.print(", ");
+            Serial.print("Found at: "); Serial.print(i);
+            return degToRotate(i);
         }
     }
     Serial.println();
-    return 0;
 }
 
 void resetDetectStates() {
@@ -211,12 +210,13 @@ void loop() {
     resetDetectStates();
     emitIR();
     delay(2); // wait a tiny bit to ensure receivers have detected
+
     float deg = checkIR();
     pulseToDeg = getMotorPos();
-	if(deg > 0 || deg < 0) { // if an IR signal is detected 
+	
+    if(deg > 0 || deg < 0) { // if an IR signal is detected 
         Serial.print("Found IR Signal at the following degrees, firing laser: "); Serial.println(deg);
         fireLaser();
-        beginCooldown();
 	}
     delay(100);
 }

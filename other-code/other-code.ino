@@ -1,4 +1,4 @@
-#include <IRremote.hpp> // Using the modern IRremote v4.x syntax
+#include <IRremote.hpp>
 
 const int NN_IR =  4;
 const int NE_IR =  5;
@@ -21,19 +21,20 @@ volatile bool wwDetected  = false;
 volatile bool nwDetected  = false;
 volatile bool bools[8];
 
+static unsigned long lastCheck = 0;
+
 void setup() {
     Serial.begin(115200);
     
     IrSender.begin(SG_IR);
-
     pinMode(NN_IR, INPUT_PULLUP);
-    pinMode(NE_IR, INPUT_PULLUP);
+    // pinMode(NE_IR, INPUT_PULLUP);
     pinMode(EE_IR, INPUT_PULLUP);
-    pinMode(SE_IR, INPUT_PULLUP);
+    // pinMode(SE_IR, INPUT_PULLUP);
     pinMode(SS_IR, INPUT_PULLUP); 
-    pinMode(SW_IR, INPUT_PULLUP); 
+    // pinMode(SW_IR, INPUT_PULLUP); 
     pinMode(WW_IR, INPUT_PULLUP);
-    pinMode(NW_IR, INPUT_PULLUP);
+    // pinMode(NW_IR, INPUT_PULLUP);
 
     // Enable pin-change interrupts on ranges 8-13 & 0-7
     PCICR |= (1 << PCIE0);  
@@ -55,16 +56,16 @@ void setup() {
 ISR(PCINT0_vect) {
     // Pins 8-11
     if (digitalRead(SS_IR) == LOW) ssDetected = true;
-    if (digitalRead(SW_IR) == LOW) swDetected = true;
+    // if (digitalRead(SW_IR) == LOW) swDetected = true;
     if (digitalRead(WW_IR) == LOW) wwDetected = true;
-    if (digitalRead(NW_IR) == LOW) nwDetected = true;
+    // if (digitalRead(NW_IR) == LOW) nwDetected = true;
 }
 ISR(PCINT2_vect) {
     // Pins 4-7
     if (digitalRead(NN_IR) == LOW) nnDetected = true;
-    if (digitalRead(NE_IR) == LOW) neDetected = true;
+    // if (digitalRead(NE_IR) == LOW) neDetected = true;
     if (digitalRead(EE_IR) == LOW) eeDetected = true;
-    if (digitalRead(SE_IR) == LOW) seDetected = true;
+    // if (digitalRead(SE_IR) == LOW) seDetected = true;
 }
 
 void emitIR() {
@@ -96,21 +97,24 @@ void resetDetectStates() {
 }
 
 void loop() {
-    resetDetectStates();
-    
-    emitIR();
-    delay(2); // wait a tiny bit to ensure receivers have detected
+    if (millis() - lastCheck >= 100) {
+        Serial.print(millis()); Serial.print(":    ");
+        lastCheck = millis();
 
-    getDetectStates();
-    Serial.print(        " NN: ");  Serial.print(bools[0]? "DETECTED" : "-");
-    Serial.print("    |    NE: ");  Serial.print(bools[1]? "DETECTED" : "-");
-    Serial.print("    |    EE: ");  Serial.print(bools[2]? "DETECTED" : "-");
-    Serial.print("    |    SE: ");  Serial.print(bools[3]? "DETECTED" : "-");
-    Serial.print("    |    SS: ");  Serial.print(bools[4]? "DETECTED" : "-");
-    Serial.print("    |    SW: ");  Serial.print(bools[5]? "DETECTED" : "-");
-    Serial.print("    |    WW: ");  Serial.print(bools[6]? "DETECTED" : "-");
-    Serial.print("    |    NW: ");  Serial.print(bools[7]? "DETECTED" : "-");
-    Serial.println();
-
-    delay(100);
+        noInterrupts();
+        
+        getDetectStates();
+        resetDetectStates();
+        
+        interrupts();
+        Serial.print(        " NN: ");  Serial.print(bools[0]? "DETECTED" : "   -    ");
+        // Serial.print("    |    NE: ");  Serial.print(bools[1]? "DETECTED" : "-");
+        Serial.print("    |    EE: ");  Serial.print(bools[2]? "DETECTED" : "   -    ");
+        // Serial.print("    |    SE: ");  Serial.print(bools[3]? "DETECTED" : "-");
+        Serial.print("    |    SS: ");  Serial.print(bools[4]? "DETECTED" : "   -    ");
+        // Serial.print("    |    SW: ");  Serial.print(bools[5]? "DETECTED" : "-");
+        Serial.print("    |    WW: ");  Serial.print(bools[6]? "DETECTED" : "   -    ");
+        // Serial.print("    |    NW: ");  Serial.print(bools[7]? "DETECTED" : "-");      
+        Serial.println();
+    }
 }
