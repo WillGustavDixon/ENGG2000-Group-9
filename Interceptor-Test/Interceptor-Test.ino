@@ -1,20 +1,5 @@
 #include <IRremote.hpp> // Using the modern IRremote v4.x syntax
 
-const int EN_PIN = A0;	// IN1 pin (enable)
-const int PH_PIN = A1;	// IN2 pin (phase)
-const int SLP_PIN = A2; // sleep pin, wakes motor driver.
-const int ENC_PIN_A = 2;  // encoder pin A 
-const int ENC_PIN_B = 3;  // encoder pin B
-
-const int IRR_PINS[] = {4,5,6,7,8,9,10,11}; // IR receiver pins
-const int IRR_PINS_AMT = sizeof(IRR_PINS) / sizeof(IRR_PINS[0]);
-volatile bool IRR_STATES[IRR_PINS_AMT];
-volatile int IRR_HITS[IRR_PINS_AMT];
-
-const int IRS_PIN = 12; // IR emitter pin 
-
-const int LAS_PIN = 13; // laser pin
-
 /* RECEIVER LAYOUT:
                   
          D11  * * * *  D4 (22.5°)
@@ -26,77 +11,58 @@ const int LAS_PIN = 13; // laser pin
            D8 * * * * D7 (157.5°)
 */
 
+const int EN_PIN = A0;	// IN1 pin (enable)
+const int PH_PIN = A1;	// IN2 pin (phase)
+const int SLP_PIN = A2; // sleep pin, wakes motor driver.
+const int ENC_PIN_A = 2;  // encoder pin A 
+const int ENC_PIN_B = 3;  // encoder pin B
+
+const int IRR_PINS[] = {4,5,6,7,8,9,10,11}; // IR receiver pins
+const int IRR_PINS_AMT = sizeof(IRR_PINS) / sizeof(IRR_PINS[0]);
+volatile int IRR_HITS[IRR_PINS_AMT];
+String RECEIVER_DIRS[] = {"NN", "NE", "EE", "SE", "SS", "SW", "WW", "NW"};
+
+const int LAS_PIN = 12; // laser pin
+
+const float CPD = 1.9444; 
+const int SPR = 700;
 const int SPEED = 128;
-const unsigned long IR_INTERVAL = 100; // interval to check for pulses in ms
-const unsigned long IR_THRESHOLD = 1; // any pulse counts as detection 
-const unsigned long IR_COOLDOWN = 1000; // interval after firing laser to wait before detecting again.
-
 int curSpd = SPEED; // R/W variable that is altered instead of the const SPEED.
-bool cd = false; // are we in detection cooldown?
-int cdTimer = 0; // how long until we resume detection?
 
-volatile unsigned long irPulseCount = 0;
 static unsigned long lastCheck = 0;
 volatile unsigned long totalMotorPulses = 0;
-int pulseToDeg = 0;
+bool foundIR = false;
+String foundRec = "";
 
-/* INPUT/OUTPUT: N/A
-// FUNCTION: Interrupt function that detects when an IR receiver gets something
-void detectIR() {
-    if(!irDetected && !cd) {
-        irPulseCount++;
-        //Serial.println("Pulsed!");
-    }
-}*/
 
 void countPulses() {
     digitalRead(ENC_PIN_B) > 0? totalMotorPulses++ : totalMotorPulses--;
+    //Serial.println(getMotorPos());
 }
 
-
-// INPUT: N/A;    OUTPUT: whether IR signal was found.
-// FUNCTION: check all IRR pins for any input, if there is check if pulse frequency meets the threshold and return true if it does
-// float findIRSignal() {
-//     float deg = 0; 
-//     if (millis() - lastCheck >= IR_INTERVAL && !cd) { // if [total ms] - [ms since last check] >= interval of reading IR pins + cooldown if on
-//         //Serial.println("Time to check...   ");
-//         lastCheck = millis();
-        
-//         //noInterrupts();
-//         for(int i = 0; i < IRR_PINS_AMT; i++) { // for each pin, check if it has a signal
-//             Serial.print(digitalRead(IRR_PINS[i])); Serial.print(", ");
-//             if(digitalRead(IRR_PINS[i]) == LOW) {
-//                 Serial.print("Found something at ");
-//                 Serial.println(IRR_PINS[i]);
-//                 deg = degToRotate(i);  
-//                 break; // when found, break the loop. 
-//             }
-//         }
-//         Serial.println(" "); 
-//         //interrupts();
-//     }
-//     else if(cd) {
-//         cdTimer <= 0? cd = false: cdTimer--;
-//         Serial.println("Cooling down");
-//     }
-//     return deg;
-// }
-
-int getMotorPos() {
-    int tMP = map(totalMotorPulses, 0, 700, 0, 360);
-    int mPos = abs(tMP % 360); 
-    return mPos;
+float getMotorPos() {
+    return (totalMotorPulses % 360) / CPD;
 }
 
 // INPUT: the position of the pin that found a signal; OUTPUT: degrees to rotate motor
 // FUNCTION: depending on which IR receiver found a signal, determine how many degrees motor must rotate to face that direction (NEEDS HALL ENCODER TO WORK) 
 // e.g. mPos = 179, pPos = 1, dest = 67.5: mPos > dest so -1(179 - 67.5) = -111.5. mPos = 40, pPos = 4, dest = 202.5: mPos < dest so 202.5 - 40 = 162.5.
-float degToRotate(int pinPos) {
-    int mPos = getMotorPos(); float dest = (45*pinPos)+22.5f; float deg; 
-    mPos >= dest? deg = -1*(mPos - dest): deg = dest - mPos; // if mPos > dest, deg is negative difference between them, otherwise deg is positive difference
-    return deg; // return distance of motor rotation from IR sensor. 
+float stepsToRotate(int pinPos) {
+    int motorPos = getMotorPos(); 
+    float dest = (45*pinPos); 
+    float deg; 
+    motorPos >= dest? deg = -1*(motorPos - dest) : deg = dest - motorPos; // if mPos > dest, deg is negative difference between them, otherwise deg is positive difference
+    return (deg); // return distance of motor rotation from IR sensor. 
+}
 
-    // WHAT if we have 2 IRRs reporting a signal? since IR emitters can be anywhere around the satellite
+float checkIR() {
+    for(int i = 0; i < IRR_PINS_AMT; i++) { 
+        if(IRR_HITS[i] > 5) {
+            foundIR = true;
+            foundRec = RECEIVER_DIRS[i];
+            return stepsToRotate(i);
+        }
+    }
 }
 
 // INPUT: direction to move motor; OUTPUT: N/A
@@ -107,34 +73,70 @@ void startMotor(bool dir) {
     curSpd = SPEED;  
 }
 
+long setShortestPathTarget(float targ) {
+  // Convert degrees to absolute step position (0 to 699)
+  long targMod = round(targ * CPD) % SPR;
+  if (targMod < 0) targMod += SPR; // Handle negative degree inputs
+  
+  // Find where motor is currently (0 to 699)
+  long curMod = totalMotorPulses % SPR;
+  if (curMod < 0) curMod += SPR;
+  
+  // Calculate the shortest change in steps (-350 to +350)
+  long stepDiff = targMod - curMod;
+  
+  if (stepDiff > (SPR/2)) {
+    stepDiff -= SPR; // Faster to go backward
+  } 
+  else if (stepDiff < -(SPR/2)) {
+    stepDiff += SPR; // Faster to go forward
+  }
+  return (totalMotorPulses + stepDiff);
+}
+
+// INPUT: target rotation relative to current position
+// FUNCTION: activate motor for short time until at target
+void rotateToPos(float targ) {
+    long error = targ - totalMotorPulses;
+    int initDeg = getMotorPos();
+    int curDeg = initDeg;
+    bool anti;
+    int counter = 0;
+    targ < 0? anti = true : anti = false; // if targ is negative, we move anticlockwise
+    startMotor(anti);
+    while((anti? curDeg > targ : targ > curDeg) && counter < 360) {
+        curDeg = getMotorPos(); Serial.println(curDeg);
+        //counter = abs(curDeg - initDeg);
+    }
+    analogWrite(EN_PIN, 0);
+}
 
 // INPUT/OUTPUT: N/A;
 // FUNCTION: stop motor, fire laser for 2 seconds, start motor again
 void fireLaser() {
     Serial.println("Firing laser...");
-    analogWrite(EN_PIN, 0);
 
     digitalWrite(LAS_PIN, HIGH); // turn on laser
     delay(2000);                 // for 2 seconds
     digitalWrite(LAS_PIN, LOW); // turn off laser
 
-    analogWrite(EN_PIN, SPEED); // begin spinning motor again
-    delay(500);
     Serial.println("Laser fired, resuming search");
+}
+
+void resetHits() {
+    for(int i = 0; i < IRR_PINS_AMT; i++) {
+        IRR_HITS[i] = 0;
+    }
 }
 
 void setup() {
     Serial.begin(115200);
     Serial.println("| Begin Interceptor Test |\n");
 
-    // Initialize IR components 
-    IrSender.begin(IRS_PIN);
-    Serial.println("IR Emitter initialised.");
-
     Serial.print("IR Receivers ");
     for(int i = 0; i < IRR_PINS_AMT; i++) {
         pinMode(IRR_PINS[i], INPUT_PULLUP);
-        IRR_STATES[i] = false;
+        IRR_HITS[i] = 0;
         Serial.print(IRR_PINS[i]);
         Serial.print(", ");
     }
@@ -167,56 +169,40 @@ void setup() {
 	
     digitalWrite(SLP_PIN, HIGH); // wake up the driver
     analogWrite(EN_PIN, 0); // make sure motor is not moving at start
-    startMotor(0); // 0 is clockwise, 1 is anti
-}
-
-void emitIR() {
-    IrSender.enableIROut(38);  // 38 kHz carrier
-    IrSender.mark(5000);       // 5 ms of 38 kHz IR
-    IrSender.space(1000);       // 1000 us off
+    delay(1000);
 }
 
 ISR(PCINT0_vect) {
     // Pins 8-11
-    if (digitalRead(IRR_PINS[4]) == LOW) IRR_STATES[4] = true;
-    if (digitalRead(IRR_PINS[5]) == LOW) IRR_STATES[5] = true;
-    if (digitalRead(IRR_PINS[6]) == LOW) IRR_STATES[6] = true;
-    if (digitalRead(IRR_PINS[7]) == LOW) IRR_STATES[7] = true;
+    if (digitalRead(IRR_PINS[4]) == LOW) IRR_HITS[4]++;
+    if (digitalRead(IRR_PINS[5]) == LOW) IRR_HITS[5]++;
+    if (digitalRead(IRR_PINS[6]) == LOW) IRR_HITS[6]++;
+    if (digitalRead(IRR_PINS[7]) == LOW) IRR_HITS[7]++;
 }
 ISR(PCINT2_vect) {
-    if (digitalRead(IRR_PINS[0]) == LOW) IRR_STATES[0] = true;
-    if (digitalRead(IRR_PINS[1]) == LOW) IRR_STATES[1] = true;
-    if (digitalRead(IRR_PINS[2]) == LOW) IRR_STATES[2] = true;
-    if (digitalRead(IRR_PINS[3]) == LOW) IRR_STATES[3] = true;
-}
-
-float checkIR() {
-    for(int i = 0; i < IRR_PINS_AMT; i++) { 
-        if(IRR_STATES[i]) {
-            Serial.print("Found at: "); Serial.print(i);
-            return degToRotate(i);
-        }
-    }
-    Serial.println();
-}
-
-void resetDetectStates() {
-    for(int i = 0; i < IRR_PINS_AMT; i++) {
-        IRR_STATES[i] = false;
-    }
+    if (digitalRead(IRR_PINS[0]) == LOW) IRR_HITS[0]++;
+    if (digitalRead(IRR_PINS[1]) == LOW) IRR_HITS[1]++;
+    if (digitalRead(IRR_PINS[2]) == LOW) IRR_HITS[2]++;
+    if (digitalRead(IRR_PINS[3]) == LOW) IRR_HITS[3]++;
 }
 
 void loop() { 
-    resetDetectStates();
-    emitIR();
-    delay(2); // wait a tiny bit to ensure receivers have detected
+    if (millis() - lastCheck >= 100) {
+        lastCheck = millis();
+        //delay(2); // wait a tiny bit to ensure receivers have detected
 
-    float deg = checkIR();
-    pulseToDeg = getMotorPos();
-	
-    if(deg > 0 || deg < 0) { // if an IR signal is detected 
-        Serial.print("Found IR Signal at the following degrees, firing laser: "); Serial.println(deg);
-        fireLaser();
-	}
-    delay(100);
+        float steps = checkIR();
+        if(foundIR) { // if an IR signal is detected 
+            float deg = getMotorPos();
+            Serial.print("Found IR Signal at receiver  " + foundRec + ",  move to  "); Serial.print(steps); Serial.print("  from  "); Serial.println(deg);
+            rotateToPos(steps);
+            fireLaser();
+            delay(1000); // buffer period for testing
+            foundIR = false;
+        }
+
+        noInterrupts();
+        resetHits();
+        interrupts();
+    }
 }
